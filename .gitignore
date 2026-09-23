@@ -6,4 +6,7 @@ app/
 
 # Temp File
 temp/
+build/
 
+.cache/
+.vscode/
