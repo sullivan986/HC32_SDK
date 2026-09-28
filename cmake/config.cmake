@@ -1,38 +1,83 @@
 function(select_chip chip_name)
+
     set(APP_HAL_PATH ${HC32_SDK_PATH}/hal/${chip_name}) 
+
+    #  hal/<chip_name> 必须存在, 否则直接报错退出配置
+    if(NOT IS_DIRECTORY ${APP_HAL_PATH})
+        file(GLOB AVAILABLE_CHIPS RELATIVE ${HC32_SDK_PATH}/hal
+             LIST_DIRECTORIES true ${HC32_SDK_PATH}/hal/*)
+        list(FILTER AVAILABLE_CHIPS EXCLUDE REGEX "\\.(txt|md|cmake)$")
+        message(FATAL_ERROR
+            "不支持的芯片型号: '${chip_name}'\n"
+            "在 ${HC32_SDK_PATH}/hal 下找不到对应目录: ${APP_HAL_PATH}\n"
+            "可选型号: ${AVAILABLE_CHIPS}"
+        )
+    endif()
 
     add_executable(hc32)
 
     target_include_directories(hc32 PRIVATE
-        ${APP_HAL_PATH}/inc
+        ${APP_HAL_PATH}
+        ${CMAKE_CURRENT_SOURCE_DIR}/inc
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${HC32_SDK_PATH}/external_lib/CMSIS_6/CMSIS/Core/Include
     )
 
     execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/tmp_file/${chip_name})
     aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src            APP_ALL_SRC_0)
-    aux_source_directory(${CMAKE_BINARY_DIR}/tmp_file/${chip_name}  APP_ALL_SRC_1)
-    aux_source_directory(${APP_HAL_PATH}/src                        APP_ALL_SRC_2)
+    aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}                APP_ALL_SRC_1)
+    aux_source_directory(${APP_HAL_PATH}                            APP_ALL_SRC_2)
+    aux_source_directory(${CMAKE_BINARY_DIR}/tmp_file/${chip_name}  APP_ALL_SRC_3)
 
     target_sources(hc32 PRIVATE
         ${APP_ALL_SRC_0}
         ${APP_ALL_SRC_1}
         ${APP_ALL_SRC_2}
+        ${APP_ALL_SRC_3}
         ${APP_HAL_PATH}/startup.s
     )
+
+    # ========================================================================
+    # C++ 专用参数 (只作用于 C++, 用生成器表达式限定; startup.s 是汇编, 不受影响)
+    # ------------------------------------------------------------------------
+    # -fno-exceptions / -fno-rtti  (双收益)
+    #   1) 本工程不使用异常与 RTTI;
+    #   2) 这两个开关会让 clang 从默认的 armv6m_soft_nofp_exn_rtti_size
+    #      切到更小的 armv6m_soft_nofp_size 变体.
+    #   实测 (driver.cpp + config.cpp 链接后):
+    #      .text 2592 -> 2108    .bss 140 -> 4    合计约 -620 字节
+    # -fno-threadsafe-statics
+    #   裸机无并发, 省掉函数内 static 变量的 __cxa_guard_acquire/release 守卫.
+    # ========================================================================
+    set(HC32_CXX_FLAGS
+        -fno-exceptions
+        -fno-rtti
+        -fno-threadsafe-statics
+    )
+
+    # 链接期只需这两个 (它们决定 multilib 目录的选择);
+    # -fno-threadsafe-statics 是纯编译期开关, 不往链接器传.
+    set(HC32_CXX_LINK_FLAGS
+        -fno-exceptions
+        -fno-rtti
+    )
+
+    # -Werror 默认开启; 想临时放行告警用: -DHC32_WERROR=OFF
+    if(NOT DEFINED HC32_WERROR)
+        set(HC32_WERROR ON)
+    endif()
 
     target_compile_options(hc32 PRIVATE
         # ---- 目标架构: XHSC HC32A052 = ARM Cortex-M0+ (ARMv6-M, 无 FPU) ----
         # --target 决定使用 ATfE 自带 picolibc 的 arm-none-eabi 运行时;
-        # -mcpu=cortex-m0plus 会自动选中 multilib 变体:
-        #   默认              -> armv6m_soft_nofp_exn_rtti_size  (支持异常/RTTI)
-        #   + -fno-exceptions -fno-rtti -> armv6m_soft_nofp_size (体积最小)
+        # -mcpu=cortex-m0plus 会自动选中 multilib 变体 (见上方 HC32_CXX_FLAGS).
         # 实测宏: __ARM_ARCH_6M__=1, __thumb__=1, __SOFTFP__=1
         --target=arm-none-eabi
         -mcpu=cortex-m0plus
         -mthumb
         -mfpu=none # Cortex-M0+ 无硬件浮点单元
         -mfloat-abi=soft # 软件浮点
-        # -fno-exceptions
-        # -fno-rtti # 纯 C 工程建议打开, 可切到体积更小的 nofp_size 变体
 
         # ---- 代码生成 ----
         -fmessage-length=0 # automatic line feeds for compilation information.
@@ -45,9 +90,43 @@ function(select_chip chip_name)
         -Wall
         -Wunused
         -Wuninitialized
+        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:${HC32_WERROR}>>:-Werror>
+
+        # ---- 个别告警降级: 保留 warning, 但不让构建失败 ----------------------
+        # 背景: -Wunused 会连带打开 -Wunused-but-set-variable ("变量被赋值但从未被
+        #       读取"), 再叠加 -Werror 就变成编译失败. 调试/试验期常有这种临时变量,
+        #       用 -Wno-error=<warning> 把它从"错误"降回"警告": 日志里仍看得见,
+        #       但不再中断构建.
+        #   - 连警告都不想看到: 改成 -Wno-unused-but-set-variable (去掉 error= )
+        #   - 想全局放行所有告警: 配置时加 -DHC32_WERROR=OFF (见上方), 无需改本文件
+        #   - 想真正消除它: 把变量用起来, 或加一句 (void)变量;
+        # ★ 位置必须在 -Wunused 与 -Werror 之后: clang 对同名告警是"后者覆盖前者",
+        #   若写在 -Wunused 之前会被它重新打开 (已实测: warn 又变回 1).
+        -Wno-error=unused-but-set-variable
+
+        # ---- C++ 专用代码生成 (见上方 HC32_CXX_FLAGS 说明) ----
+        $<$<COMPILE_LANGUAGE:CXX>:${HC32_CXX_FLAGS}>
 
         ${EXTRA_CO}
     )
+
+    # ========================================================================
+    # 厂商聚合代码 (driver.cpp) 的告警抑制
+    # ------------------------------------------------------------------------
+    # driver.cpp 是 1.4 万行原厂 C 代码, 直接按 C++ 编译. 抑制只作用于它一个文件:
+    # 手工维护的 config.cpp 与 app/ 下的应用代码保持全量告警.
+    #   -Wno-deprecated-volatile   原厂惯用 `volatile 变量--` 做超时计数
+    #                              (注意: 写成 -Wno-volatile 在 clang 上是无效选项!)
+    #   -Wno-unused-function       原厂大量未被引用的 static 函数
+    #   -Wno-unused-variable/-Wno-return-type/-Wno-strict-aliasing
+    #   -Wno-deprecated-declarations
+    # ========================================================================
+    if(EXISTS ${APP_HAL_PATH}/driver.cpp)
+        set_source_files_properties(${APP_HAL_PATH}/driver.cpp PROPERTIES
+            COMPILE_OPTIONS
+            "-Wno-deprecated-volatile;-Wno-unused-function;-Wno-unused-variable;-Wno-return-type;-Wno-strict-aliasing;-Wno-deprecated-declarations"
+        )
+    endif()
 
     target_link_options(hc32 PRIVATE
         # ---- 目标架构 (链接期同样需要, 用于选择正确的 multilib 与 ABI) ----
@@ -56,6 +135,9 @@ function(select_chip chip_name)
         -mthumb
         -mfpu=none
         -mfloat-abi=soft
+        # 与编译期保持一致: 否则对象文件用 nofp_size 变体, 链接却按
+        # exn_rtti_size 挑库, 属于跨变体混链 (实测能过, 但不该依赖).
+        ${HC32_CXX_LINK_FLAGS}
 
         # ---- 启动流程 ----
         # 使用 hal/<chip>/startup.s 自带向量表与 Reset_Handler,
@@ -90,5 +172,15 @@ function(select_chip chip_name)
         # ---- C++ 需要时打开 (会引入 libstdc++ 静态库) ----
         # -static-libstdc++
     )
-endfunction()
 
+    # ---- 生成 hex / bin (供下载工具使用) ----
+    # 注意: 目标名由上面的 add_executable() 决定, 此处必须一致。
+    set(HEX_FILE ${PROJECT_BINARY_DIR}/hc32.hex)
+    set(BIN_FILE ${PROJECT_BINARY_DIR}/hc32.bin)
+    add_custom_command(
+        TARGET hc32 POST_BUILD
+        COMMAND ${CMAKE_OBJCOPY} -O ihex $<TARGET_FILE:hc32> ${HEX_FILE}
+        COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:hc32> ${BIN_FILE}
+        COMMENT "Generating app.hex / app.bin"
+    )
+endfunction()
