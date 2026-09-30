@@ -1,14 +1,14 @@
 /**
  *******************************************************************************
  * @file  driver.h
- * @brief HC32A052 DDL 驱动库 - 聚合头文件 (声明/类型/宏) [自动生成, 勿手改]
+ * @brief HC32A052 驱动库 - 聚合头文件 (声明/类型/宏) [自动生成, 勿手改]
  *
  * 本文件由 XHSC HC32A052 DDL 自动聚合生成, 请勿逐模块手工修改.
  * 重新生成: python3 tools/merge_driver.py            (会覆盖本文件的修改)
  *
- * 聚合来源: temp/ 下的厂商 DDL 包 (HC32A052_DLL_xxx)
- *   driver/{inc,src}   驱动模块
- *   mcu/common/        base_types.h / 器件头 / 中断框架
+ * 聚合来源: temp/HC32A052_DLL_Rev1.0.1/
+ *   driver/inc//                       驱动模块 (inc + src 同名目录)
+ *   mcu/common//                       器件头 / 中断框架
  *
  * 未纳入本文件的部分 (与板级/外部强相关, 按「机制/策略」分层):
  *   hal/hc32a052/config.h          板级配置「机制」: 类型 / 预设 / 校验
@@ -35,16 +35,17 @@
 /******************************************************************************/
 /* 板级配置 (外部相关, 按「机制/策略」分层)
  *
- * 驱动中的时钟计算 (sysctrl.c 的 PLL 与 Sysctrl_GetHClkFreq) 必须知道板上实际
- * 焊接的晶振频率 (SYSTEM_XTH / SYSTEM_XTL), 故自动包含同目录下的 config.h.
+ * 驱动中的时钟计算 (sysctrl.c) 必须知道板上实际焊接的晶振频率, 故自动包含
+ * 同目录下的 config.h.
  *
  *   config.h       板级配置「机制」: Config 类型 / 预设 / 校验 (HAL 提供)
  *   board_config.h 板级配置「策略」: 晶振频率 + 生效配置 (app 提供)
  *                  config.h 会自动 #include 它 (若在 include path 上)
  *
  * 若确实不用 board_config.h, 也可用编译选项传入:
- *   -DSYSTEM_XTH=8000000 -DSYSTEM_XTL=32768
- *   -DHC32_BOARD_CONFIG=::hc32::board::preset_rch_4mhz
+ *   -DSYSTEM_XTH=<值>
+ *   -DSYSTEM_XTL=<值>
+ *   -DHC32_BOARD_CONFIG=::hc32::board::<预设名>
  */
 /******************************************************************************/
 #if defined(__has_include)
@@ -52,13 +53,13 @@
 #    include "config.h"
 #  endif
 #endif
-
 #if !defined(SYSTEM_XTH)
 #  error "SYSTEM_XTH 未定义: 请在 app 的 inc 目录创建 board_config.h, 给出外部高速晶振频率(Hz)"
 #endif
 #if !defined(SYSTEM_XTL)
 #  error "SYSTEM_XTL 未定义: 请在 app 的 inc 目录创建 board_config.h, 给出外部低速晶振频率(Hz)"
 #endif
+
 
 /* ========================================================================== */
 /*  系统头                                                                       */
@@ -71,7 +72,7 @@
 #include <assert.h>
 
 /* ========================================================================== */
-/*  基础类型 (mcu/common/base_types.h)                                            */
+/*  基础类型 (base_types.h)                                                       */
 /* ========================================================================== */
 
 
@@ -172,7 +173,7 @@ typedef enum
 
 
 /* ========================================================================== */
-/*  CMSIS 内核配置 + 中断号 (hc32a052.h 前置段, 必须早于 core_cm0plus.h)                    */
+/*  CMSIS 内核配置 + 中断号 (hc32a052.h 前置段, 必须早于内核核心头)                              */
 /* ========================================================================== */
 
 
@@ -10892,12 +10893,7 @@ extern "C" {
 #endif
 
 /* ========================================================================== */
-/*  驱动核心: 公共宏 / 类型 / 系统控制 (ddl.h + sysctrl.h)                                 */
-/* ========================================================================== */
-
-
-/* ========================================================================== */
-/*  驱动模块 (driver/inc 其余 28 个)                                                 */
+/*  驱动模块 (driver/inc, 30 个)                                                   */
 /* ========================================================================== */
 
 
@@ -18087,7 +18083,7 @@ boolean_t   WWDT_GetRunFlag(void);
 
 
 /* ========================================================================== */
-/*  中断分发框架 (mcu/common/interrupts_hc32a052.h)                                 */
+/*  中断分发框架 (interrupts_hc32a052.h)                                            */
 /* ========================================================================== */
 
 
@@ -18924,55 +18920,55 @@ extern void EnableNvic(IRQn_Type enIrq, en_irq_level_t enLevel, boolean_t bEn);
 /* ========================================================================== */
 
 /*
- * interrupts_hc32a052.h 只声明了 EnableNvic(), 下面这些全部没有声明.
+ * interrupts_hc32a052.c 只声明了 EnableNvic(), 下面这些全部没有声明.
  * 单独编译成 .o 时它们是 C 符号; 但合并进 driver.cpp 后用 C++ 编译,
  * 会得到 _Z... 修饰名, 向量表引用的 C 符号名再也匹配不上, 实测后果是
  * 向量表全部落回 startup.s 的 Default_Handler, 中断彻底失效.
  *
- * 另: 回调若是弱未定义 (用户没实现), 入口会跳到地址 0. 使用时请按需实现.
+ * 另: 回调若未实现, 由 driver.cpp 末尾的弱空定义兜底, 不会跳地址 0.
  */
-/* 中断回调: 弱符号, 应用层实现同名函数即可覆盖 (41 个) */
-__WEAK void SysTick_IRQHandler(void);
-__WEAK void PortA_IRQHandler(void);
-__WEAK void PortB_IRQHandler(void);
-__WEAK void PortC_IRQHandler(void);
-__WEAK void PortD_IRQHandler(void);
-__WEAK void Dmac_IRQHandler(void);
-__WEAK void Tim3_IRQHandler(void);
-__WEAK void Usart0_IRQHandler(void);
-__WEAK void Usart1_IRQHandler(void);
-__WEAK void LpUart0_IRQHandler(void);
-__WEAK void LpUart1_IRQHandler(void);
-__WEAK void Spi0_IRQHandler(void);
-__WEAK void Spi1_IRQHandler(void);
-__WEAK void I2c0_IRQHandler(void);
-__WEAK void I2c1_IRQHandler(void);
-__WEAK void Atim0_IRQHandler(void);
-__WEAK void Atim1_IRQHandler(void);
-__WEAK void Atim2_IRQHandler(void);
-__WEAK void LpTim_IRQHandler(void);
-__WEAK void Gtim0_IRQHandler(void);
-__WEAK void Gtim1_IRQHandler(void);
-__WEAK void Btim0_IRQHandler(void);
-__WEAK void Btim1_IRQHandler(void);
-__WEAK void Btim2_IRQHandler(void);
-__WEAK void Btim3_IRQHandler(void);
-__WEAK void Btim4_IRQHandler(void);
-__WEAK void Btim5_IRQHandler(void);
-__WEAK void I2cslv_IRQHandler(void);
-__WEAK void Iwdt_IRQHandler(void);
-__WEAK void Wwdt_IRQHandler(void);
-__WEAK void Rtc_IRQHandler(void);
-__WEAK void Adc_IRQHandler(void);
-__WEAK void Vc0_IRQHandler(void);
-__WEAK void Vc1_IRQHandler(void);
-__WEAK void Lvd_IRQHandler(void);
-__WEAK void Can_IRQHandler(void);
-__WEAK void Atim_Bk_IRQHandler(void);
-__WEAK void Flash_IRQHandler(void);
-__WEAK void Ram_IRQHandler(void);
-__WEAK void Ctrim_IRQHandler(void);
-__WEAK void Fault_IRQHandler(void);
+/* 中断回调: 应用层实现同名强符号即可覆盖; 未实现时用 driver.cpp 的弱空定义 (41 个) */
+void SysTick_IRQHandler(void);
+void PortA_IRQHandler(void);
+void PortB_IRQHandler(void);
+void PortC_IRQHandler(void);
+void PortD_IRQHandler(void);
+void Dmac_IRQHandler(void);
+void Tim3_IRQHandler(void);
+void Usart0_IRQHandler(void);
+void Usart1_IRQHandler(void);
+void LpUart0_IRQHandler(void);
+void LpUart1_IRQHandler(void);
+void Spi0_IRQHandler(void);
+void Spi1_IRQHandler(void);
+void I2c0_IRQHandler(void);
+void I2c1_IRQHandler(void);
+void Atim0_IRQHandler(void);
+void Atim1_IRQHandler(void);
+void Atim2_IRQHandler(void);
+void LpTim_IRQHandler(void);
+void Gtim0_IRQHandler(void);
+void Gtim1_IRQHandler(void);
+void Btim0_IRQHandler(void);
+void Btim1_IRQHandler(void);
+void Btim2_IRQHandler(void);
+void Btim3_IRQHandler(void);
+void Btim4_IRQHandler(void);
+void Btim5_IRQHandler(void);
+void I2cslv_IRQHandler(void);
+void Iwdt_IRQHandler(void);
+void Wwdt_IRQHandler(void);
+void Rtc_IRQHandler(void);
+void Adc_IRQHandler(void);
+void Vc0_IRQHandler(void);
+void Vc1_IRQHandler(void);
+void Lvd_IRQHandler(void);
+void Can_IRQHandler(void);
+void Atim_Bk_IRQHandler(void);
+void Flash_IRQHandler(void);
+void Ram_IRQHandler(void);
+void Ctrim_IRQHandler(void);
+void Fault_IRQHandler(void);
 
 /* 向量表中断入口: driver 提供强定义, 覆盖 startup.s 的弱默认 (32 个) */
 void HardFault_Handler(void);
@@ -19009,19 +19005,13 @@ void FLASH_RAM_IRQHandler(void);
 void CTRIM_FAULT_IRQHandler(void);
 
 /* ========================================================================== */
-/*  系统时钟声明 (mcu/common/system_hc32a052.h)                                     */
-/* ========================================================================== */
-
-
-/* ========================================================================== */
 /*  原厂遗漏声明的补全                                                                 */
 /* ========================================================================== */
 
 /*
- * 以下符号在源码中有定义, 但原厂头文件从未声明:
- *   - SPI_* / Sysctrl_GetChipInfo: 若不补声明, 聚合到 .cpp 用 C++
- *     编译后会变成 _Z... 修饰名, 与其它 TU 的 C 符号引用不匹配;
- *   - SystemHCLK / SystemPCLK: 全局变量漏声明, 实现见 config.cpp.
+ * 以下符号在源码中有定义, 但原厂头文件从未声明; 若不补声明,
+ * 聚合到 .cpp 用 C++ 编译后会变成 _Z... 修饰名, 与其它 TU 的
+ * C 符号引用不匹配 (实现见 config.cpp 的另有说明).
  * 校验: clang++ -c driver.cpp && llvm-nm driver.o | grep -w _Z
  */
 void     SPI_SetDMAReq(SPI_TypeDef *SPIx, uint32_t u32DMAReq);

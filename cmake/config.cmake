@@ -68,16 +68,35 @@ function(select_chip chip_name)
         set(HC32_WERROR ON)
     endif()
 
+    # ========================================================================
+    # 目标架构: 按芯片选 (Cortex-M0+ 无 FPU / Cortex-M4F 带 FPU)
+    # ------------------------------------------------------------------------
+    # -mcpu 同时决定 ATfE 自带 picolibc 的 multilib 变体, 编译期与链接期
+    # 必须完全一致, 否则是跨变体混链.
+    #   新增芯片记得在这里加分支 (或把映射做成 CMake 变量表).
+    # ========================================================================
+    if(chip_name MATCHES "^hc32f460")
+        # HC32F460: Cortex-M4F, 单精度硬浮点 (FPv4-SP)
+        set(HC32_MCPU cortex-m4)
+        set(HC32_MFPU fpv4-sp-d16)
+        set(HC32_MFLOAT hard)
+    else()
+        # HC32A052 / HC32F005: Cortex-M0+, 无硬件浮点
+        set(HC32_MCPU cortex-m0plus)
+        set(HC32_MFPU none)
+        set(HC32_MFLOAT soft)
+    endif()
+
     target_compile_options(hc32 PRIVATE
-        # ---- 目标架构: XHSC HC32A052 = ARM Cortex-M0+ (ARMv6-M, 无 FPU) ----
+        # ---- 目标架构 (变量定义见上方, 随芯片不同) ----
         # --target 决定使用 ATfE 自带 picolibc 的 arm-none-eabi 运行时;
-        # -mcpu=cortex-m0plus 会自动选中 multilib 变体 (见上方 HC32_CXX_FLAGS).
-        # 实测宏: __ARM_ARCH_6M__=1, __thumb__=1, __SOFTFP__=1
+        # -mcpu 会自动选中 multilib 变体 (见上方 HC32_CXX_FLAGS).
+        # 实测宏: __ARM_ARCH_6M__=1, __thumb__=1, __SOFTFP__=1 (M0+)
         --target=arm-none-eabi
-        -mcpu=cortex-m0plus
+        -mcpu=${HC32_MCPU}
         -mthumb
-        -mfpu=none # Cortex-M0+ 无硬件浮点单元
-        -mfloat-abi=soft # 软件浮点
+        -mfpu=${HC32_MFPU}
+        -mfloat-abi=${HC32_MFLOAT}
 
         # ---- 代码生成 ----
         -fmessage-length=0 # automatic line feeds for compilation information.
@@ -118,23 +137,26 @@ function(select_chip chip_name)
     #   -Wno-deprecated-volatile   原厂惯用 `volatile 变量--` 做超时计数
     #                              (注意: 写成 -Wno-volatile 在 clang 上是无效选项!)
     #   -Wno-unused-function       原厂大量未被引用的 static 函数
+    #   -Wno-unused-parameter      原厂许多函数参数未使用 (如 MDK 遗留的 _ttywrch)
     #   -Wno-unused-variable/-Wno-return-type/-Wno-strict-aliasing
     #   -Wno-deprecated-declarations
+    #   -Wno-unknown-attributes    厂商用 GCC 专有属性 (long_call / optimize),
+    #                              clang 会忽略并告警; 功能上无害
     # ========================================================================
     if(EXISTS ${APP_HAL_PATH}/driver.cpp)
         set_source_files_properties(${APP_HAL_PATH}/driver.cpp PROPERTIES
             COMPILE_OPTIONS
-            "-Wno-deprecated-volatile;-Wno-unused-function;-Wno-unused-variable;-Wno-return-type;-Wno-strict-aliasing;-Wno-deprecated-declarations"
+            "-Wno-deprecated-volatile;-Wno-unused-function;-Wno-unused-parameter;-Wno-unused-variable;-Wno-return-type;-Wno-strict-aliasing;-Wno-deprecated-declarations;-Wno-unknown-attributes"
         )
     endif()
 
     target_link_options(hc32 PRIVATE
         # ---- 目标架构 (链接期同样需要, 用于选择正确的 multilib 与 ABI) ----
         --target=arm-none-eabi
-        -mcpu=cortex-m0plus
+        -mcpu=${HC32_MCPU}
         -mthumb
-        -mfpu=none
-        -mfloat-abi=soft
+        -mfpu=${HC32_MFPU}
+        -mfloat-abi=${HC32_MFLOAT}
         # 与编译期保持一致: 否则对象文件用 nofp_size 变体, 链接却按
         # exn_rtti_size 挑库, 属于跨变体混链 (实测能过, 但不该依赖).
         ${HC32_CXX_LINK_FLAGS}
@@ -181,6 +203,6 @@ function(select_chip chip_name)
         TARGET hc32 POST_BUILD
         COMMAND ${CMAKE_OBJCOPY} -O ihex $<TARGET_FILE:hc32> ${HEX_FILE}
         COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:hc32> ${BIN_FILE}
-        COMMENT "Generating app.hex / app.bin"
+        COMMENT "Generating hc32.hex / hc32.bin"
     )
 endfunction()

@@ -1,14 +1,14 @@
 /**
  *******************************************************************************
  * @file  driver.cpp
- * @brief HC32A052 DDL 驱动库 - 聚合实现 [自动生成, 勿手改]
+ * @brief HC32A052 驱动库 - 聚合实现 [自动生成, 勿手改]
  *
  * 本文件由 XHSC HC32A052 DDL 自动聚合生成, 请勿逐模块手工修改.
  * 重新生成: python3 tools/merge_driver.py            (会覆盖本文件的修改)
  *
- * 聚合来源: temp/ 下的厂商 DDL 包 (HC32A052_DLL_xxx)
- *   driver/{inc,src}   驱动模块
- *   mcu/common/        base_types.h / 器件头 / 中断框架
+ * 聚合来源: temp/HC32A052_DLL_Rev1.0.1/
+ *   driver/inc//                       驱动模块 (inc + src 同名目录)
+ *   mcu/common//                       器件头 / 中断框架
  *
  * 未纳入本文件的部分 (与板级/外部强相关, 按「机制/策略」分层):
  *   hal/hc32a052/config.h          板级配置「机制」: 类型 / 预设 / 校验

@@ -319,3 +319,183 @@ endif()
   其余各项互不相同。
 - `app/test` (USART 打印例程) 端到端构建: **FLASH 14812 B / RAM 1712 B**,
   生成 `hc32.hex` / `hc32.bin`; `clangd --check` 0 errors。
+
+---
+
+## 11. 三层架构 (现行, 2026-09 起)
+
+```
+hal/<chip>/driver.{h,cpp}   器件层   tools/merge_driver.py 生成, 勿手改
+hal/<chip>/config.{h,cpp}   机制层   HAL 提供: Config 类型 / 预设 / is_valid / 时钟实现
+app/<proj>/inc/board_config.h 策略层 app 提供: 晶振频率 + HC32_BOARD_CONFIG + 引脚
+```
+
+包含方向: `driver.h -> config.h -> board_config.h`; `config.cpp -> driver.h`
+(**不可反向**, 否则循环包含)。
+
+为什么分层: "有哪些配置项 / 时钟怎么切" 是每块板都一样的机制; "焊了几 MHz 晶振 /
+开机跑哪个档 / LED 接哪脚" 是每个应用不同的策略。策略放 HAL 会导致换 app 就得改 HAL。
+
+**新增一块板子 = 只写一个 `board_config.h`, 不动 HAL。**
+缺失宏 / 非法配置都有编译期报错与指引, 例如:
+
+```c
+#define SYSTEM_XTH (8000000u)
+#define HC32_BOARD_CONFIG ::hc32::board::preset_pll_64mhz_from_xth   /* 或自定义 constexpr */
+```
+
+`config.h` 里的 `static_assert(is_valid(config))` 与 `xth_range_covers(...)`
+会在编译期拦住"8MHz 晶振却选了 20~32MHz 档"这类错误。
+
+---
+
+## 12. 启动文件/链接脚本自动生成: `tools/gen_startup.py`
+
+手抄向量表极易出错(有保留空洞、且一个槽位可能被多个外设共用), 抄错一个 word
+中断就静默失效。本工具从器件头的 `IRQn_Type` 自动生成。
+
+```bash
+python3 tools/gen_startup.py                 # 生成 CHIPS 里登记的全部芯片
+python3 tools/gen_startup.py hc32f005        # 指定芯片
+python3 tools/gen_startup.py --check hc32a052  # 生成到 /tmp, 与现有文件比对
+```
+
+新增芯片: 在 `CHIPS` 里加一项 —— `device_hdr` / `arch` / `mcpu` / `core_vec` /
+`irq_alias` / `flash` / `ram` / `min_heap` / `min_stack` / `note`。
+
+要点:
+
+- **`core_vec` 内核异常槽因内核而异**: M0+ 是 `NMI/HardFault/…/SVC/PendSV/SysTick`;
+  M4 还要 `MemManage/BusFault/UsageFault/DebugMonitor`(共 16 槽)。
+- **保留槽用 `Dummy_IRQHandler`**(死循环) 而非 `0`: 万一误触发能停住被调试器捕获。
+- **`Reset_Handler` 必须是本文件定义的强符号**, 不能进弱别名表 (否则
+  `redefinition of 'Reset_Handler'`)。
+- **同一个 IRQ 槽被多个外设共用**时用 `irq_alias` 覆盖 (如 A052 的
+  `26 -> VC0_1_LVD_IRQHandler`)。
+- 生成结果与 A052 现有手工文件**逐项一致**(48 项向量表 + 72 条弱别名), 可信。
+
+`Link.ld` 里与芯片相关的只有 `MEMORY` 与堆栈保留量; **TLS 段(`.tdata`/`.tbss`)
+与 picolibc 符号是固定模板**, 不要动 —— 见 §6 与 §8 的说明。
+
+---
+
+## 13. HC32F005 实测 (2026-09, 完成)
+
+- 包 `temp/HC32F005_DDL_Rev2.0.0` (20 个驱动模块), Cortex-M0+。
+- 产出: `driver.h` 7625 行 / `driver.cpp` 7729 行 + `config.{h,cpp}` + `Link.ld`
+  + `startup.s` (48 字向量表)。
+- 内存: **32KB Flash / 4KB RAM**(全系列), cstack/heap 各 0x100。
+- 与 A052 的关键差异(写 config 时必须知道):
+  - **无 PLL**。时钟源仅 RCH/XTH/RCL/XTL。
+  - RCH 是"直选频率"而非"12MHz 再分频": `24M=0, 22.12M=1, 16M=2, 8M=3, 4M=4`
+    (**枚举值就是 TRIM 表索引**)。XTH 最高 32MHz。
+  - Flash 读等待周期只有 0/1 两档。
+  - 无 XTL 振幅配置, 无 `SYSTEM_XTL` 宏, 无晶振失效检测 API。
+  - 中断号与 A052 不同: PORT0-3=0..3, UART0/1=6/7, SPI=10, I2C=12,
+    TIM0/1/2=14/15/16, ADTIM4/5/6=18/19/20, PCA=21, WDT=22, ADC=24,
+    VC0=26, VC1=27, LVD=28, FLASH_RAM=30, CLKTRIM=31。
+- profile 要点:
+  - `missing_decls`: `Uart_SetSaddr` / `Debug_Output` / `_ttywrch` / `__backspace`
+    (后两个是 `ddl.c` 里的 Keil 遗留钩子; 不删原厂代码就必须给 C 声明, 否则变 `_Z`)。
+  - `cpp_patches`: 把 `ddl.c` 的 `#ifndef __DEBUG / #define __DEBUG` 改成 `#undef __DEBUG`
+    —— 否则会编进 MDK 风格的 `fputc` 重定向, 而 picolibc 的 printf 走 FILE 回调,
+    该重定向**无效**且强定义 `fputc` 有与 libc 归档成员冲突的风险。
+- 验证: `-Werror` 0 warning; 无全局 `_Z`; 链接 **FLASH 3488 B / 32K, RAM 664 B / 4K**;
+  向量表 word0=`0x20001000`(RAM 顶), word1=`Reset_Handler|1`; CMake 全流程通过。
+
+---
+
+## 14. HC32F460 实测 (2026-09, 完成)
+
+包 `temp/HC32F460_DDL_Rev3.3.0`, **布局与 A052/F005 完全不同**:
+
+| 项 | A052 / F005 | F460 |
+| --- | --- | --- |
+| 驱动 | `driver/{inc,src}` 的 DDL | `drivers/hc32_ll_driver/{inc,src}` 的 **LL 驱动** (42 个 `hc32_ll_*`) |
+| 伞形头 | `ddl.h` | `hc32_ll.h` (含 `hc32_ll_def.h` + `hc32f4xx.h` + `hc32f4xx_conf.h`) |
+| 器件头 | `mcu/common/<chip>.h` | `drivers/cmsis/Device/HDSC/hc32f4xx/Include/{hc32f460.h,hc32f4xx.h}` |
+| 时钟实现 | `mcu/common/system_<chip>.c` | `.../Source/system_hc32f460.c` |
+| 中断 | `interrupts_<chip>.{h,c}` | `hc32_ll_interrupts.c` + `hc32f460_ll_interrupts_share.c` |
+| 内核 | Cortex-M0+ | **Cortex-M4F** |
+| 中断命名 | 外设名 (`PORTA_IRQn` → `PORTA_IRQHandler`) | **位置式** `INT000_IRQn` → **`IRQ000_Handler`** |
+| RAM 基址 | `0x20000000` | **`0x1FFF8000`** (188KB) |
+
+产出: `driver.h` 27650 行 / `driver.cpp` 35537 行 + `config.{h,cpp}` +
+`Link.ld` + `startup.s` (160 字向量表)。
+
+### 14.1 移植时踩到的 5 个坑 (都是 F460 独有)
+
+1. **`device_defines` 需要 `HC32F460`**
+   `hc32f4xx.h` 用 `#if defined(HC32F460)` 选型, 否则 `#error`. 厂商工程里由 IDE 传,
+   聚合后写进 driver.h 开头 (`PROFILE["device_defines"]`)。
+
+2. **还需要 `USE_DDL_DRIVER`**
+   `hc32_ll.h` 把"包含各模块头"整段放在 `#if defined(USE_DDL_DRIVER)` 里, 而它默认是
+   **注释掉的**。不定义的话模块声明被整段编译掉, 只剩 `.c` 里的定义 → 大面积
+   "undeclared identifier"。
+
+3. **`hc32f4xx_conf.h` 必须放最前 (synthetic)**
+   每个例程各带一份且多数模块 `DDL_OFF`; 聚合方案要 driver.h 自包含, 故用生成的
+   "全部打开"版本替代 (`synthetic: {"hc32f4xx_conf.h": "ll_conf"}`)。
+   **关键**: 它必须发在文件最前 —— 伞形头里有 `#if (LL_ADC_ENABLE == DDL_ON) #include ...`,
+   若生成内容晚于它, 那些 `#if` 因宏未定义判假, 模块声明整段消失。
+   `LL_PRINT_ENABLE` 保持 OFF (打开会引入 IAR 专有的 `<LowLevelIOInterface.h>`)。
+   另外需要 `LL_INTERRUPTS_SHARE_ENABLE` (无对应头文件, 是独立宏)。
+
+4. **`strip_trailing` 不能多吃 `#endif`** ← 最阴的一个
+   F460 的模块头/源结尾长这样:
+   ```
+   #endif /* LL_WDT_ENABLE */      <- 功能性收尾, 必须保留
+   #endif /* __HC32_LL_WDT_H__ */  <- include guard, 可以删
+   ```
+   旧实现会连删两个 → `unterminated conditional directive`。
+   更阴的是 `pop_tail_noise` 把 `#endif /* LL_WDT_ENABLE */` 当成"尾随注释块"
+   (它以 `*/` 结尾!) 删掉了。现在改为: 只有**整块都是注释**(起始行以 `/*` 开头)
+   才算尾注释, 且最多删一个 `#endif`; 源文件调用时 `drop_endif=False`。
+
+5. **中断源要从模块列表排除**
+   `hc32_ll_interrupts.c` 就在 `hc32_ll_driver/src` 下, 与普通模块同目录。
+   既在 `MERGED_SRCS` 又在 `MCU_SRCS` 里 → 重复编进 driver.cpp → `redefinition`。
+
+### 14.2 其它要点
+
+- `hc32_ll.h` 的中断入口是 `IRQ000_Handler`..`IRQ143_Handler` (不是 `INT...`),
+  `gen_startup.py` 用 `handler_rule: (r"^INT(\d+)$", r"IRQ\1_Handler")` 转换。
+  已与官方 `startup_hc32f460.S` 的 160 项向量表**逐项比对一致**。
+- `hc32_ll_interrupts.h` **已声明**全部 `IRQxxx_Handler` (与 DDL 的 `__WEAK` 回调不同),
+  故 `irq_style = "ll"`, 不需要补声明也不需要补弱定义。
+- 排除 `hc32_ll_usb.c` (依赖 midware 的 `usb_bsp.h`) 与 `hc32_ll_usb.h`。
+- **`.ramfunc`**: 厂商用 `__RAM_FUNC = __attribute__((section(".ramfunc")))` 标记
+  EFM 烧写等必须跑在 RAM 里的函数。`Link.ld` 必须在 `.data`/`.tdata` **之后、
+  `__data_end` 之前**放 `.ramfunc`, 这样启动代码的一次拷贝顺带把它搬进 RAM。
+- **`HRC_VALUE` 是全局变量**, 定义在被排除的 `system_hc32f460.c` 里,
+  而 `CLK_GetClockFreq`/`CLK_PLLInit` 直接引用它。实现搬到 config.cpp 时必须一起搬,
+  并在 `SystemCoreClockUpdate` 里按 `ICG1.HRCFREQSEL` 刷新成 16/20MHz。
+- 需排除的源: `system_hc32f460.c` (→ config.cpp)、`hc32_ll_usb.c`。
+- 时钟初始化顺序 (照抄官方, 缺一不可):
+  刷 HRC_VALUE → `LL_PERIPH_WE` → FPU(CPACR) → `CLK_SetClockDiv` →
+  `SRAM_SetWaitCycle` → `EFM_SetWaitCycle` → HRC/LRC → XTAL → PLL →
+  `PWC_HighSpeedToHighPerformance()` → `CLK_SetSysClockSrc` → `LL_PERIPH_WP` → 刷新频率。
+- F460 的 PLL 参数是 **M/N/P/Q/R**(寄存器存"值-1"), 不是 A052 的 in_div/mul_n/out_div。
+  `Fvco = Fin/M*N`, `Fout = Fvco/P`。config.h 里存实际值, config.cpp 做 -1 换算。
+- 厂商用 GCC 专有属性 `long_call` / `optimize`, clang 会告警 → 给 driver.cpp 加
+  `-Wno-unknown-attributes`。
+
+### 14.3 验证结果
+
+- `driver.cpp` 0 error; 剩余告警仅 `-Wunknown-attributes`(5) 与 `-Wunused-parameter`(4),
+  已由 CMake 的 per-file 抑制覆盖。
+- 无厂商符号变 `_Z`(仅 config.h 里 2 个 `constexpr` 助手是 weak `_Z`, 属正常 C++)。
+- 端到端 CMake 构建: **FLASH 19248 B / 512KB, RAM 3600 B / 188KB**。
+- 向量表 word0 = `0x20027000` (= 0x1FFF8000 + 188K, 栈顶正确), word1 = `Reset_Handler|1`。
+
+---
+
+## 15. HC32F052 — 暂缓 (包被删除)
+
+`temp/HC32F052_DLL_Rev1.1.0` 曾出现 **ext4 目录项/inode 不一致**
+(`scandir` 能列出且 `is_dir=True`, 但 `stat`/`open`/`listdir` 全 `ENOENT`),
+已由用户删除。需要时重新解压该包, 结构同构于 A052/F005
+(`driver/{inc,src}` + `mcu/common` + `interrupts_hc32f052.*`),
+按 §7 流程照做即可 (`hal/hc32f052/` 目录已存在, 目前为空)。
+
