@@ -1,4 +1,12 @@
+include(${HC32_SDK_PATH}/cmake/select_flash.cmake)
+
+# ============================================================================
+# select_chip(<chip> [FLASH <容量|后缀>] [RAM <容量>] [PINS <引脚数>])
+#   FLASH 省略 = 该芯片默认容量;  PINS 只定义宏 HC32_PIN_COUNT, 不影响链接.
+#   容量表与解析实现见 select_flash.cmake.
+# ============================================================================
 function(select_chip chip_name)
+    cmake_parse_arguments(CHIP "" "FLASH;RAM;PINS" "" ${ARGN})
 
     set(APP_HAL_PATH ${HC32_SDK_PATH}/hal/${chip_name}) 
 
@@ -16,8 +24,31 @@ function(select_chip chip_name)
 
     add_executable(hc32)
 
+    hc32_select_flash(${chip_name} "${CHIP_FLASH}" "${CHIP_RAM}")
+
+    # 容量信息供应用做条件编译
+    if(DEFINED HC32_MEM_FLASH_BYTES)
+        target_compile_definitions(hc32 PRIVATE
+            HC32_FLASH_SIZE=${HC32_MEM_FLASH_BYTES}UL
+            HC32_RAM_SIZE=${HC32_MEM_RAM_BYTES}UL
+        )
+    endif()
+    if(NOT "${CHIP_PINS}" STREQUAL "")
+        target_compile_definitions(hc32 PRIVATE HC32_PIN_COUNT=${CHIP_PINS})
+    endif()
+
+    # 容量覆盖参数, 对应 Link.ld 里的 DEFINED(__flash_len)
+    set(HC32_MEM_LINK_OPTS "")
+    if(DEFINED HC32_MEM_FLASH_BYTES)
+        list(APPEND HC32_MEM_LINK_OPTS
+            -Wl,--defsym=__flash_len=${HC32_MEM_FLASH_BYTES}
+            -Wl,--defsym=__ram_len=${HC32_MEM_RAM_BYTES}
+        )
+    endif()
+
     target_include_directories(hc32 PRIVATE
         ${APP_HAL_PATH}
+        ${HC32_SDK_PATH}/hal/common
         ${CMAKE_CURRENT_SOURCE_DIR}/inc
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -110,7 +141,7 @@ function(select_chip chip_name)
         -Wunused
         -Wuninitialized
         $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:${HC32_WERROR}>>:-Werror>
-
+        $<$<COMPILE_LANGUAGE:ASM>:-Wno-unused-command-line-argument>
         # ---- 个别告警降级: 保留 warning, 但不让构建失败 ----------------------
         # 背景: -Wunused 会连带打开 -Wunused-but-set-variable ("变量被赋值但从未被
         #       读取"), 再叠加 -Werror 就变成编译失败. 调试/试验期常有这种临时变量,
@@ -169,6 +200,9 @@ function(select_chip chip_name)
 
         # ---- 链接脚本 (hal/<chip>/Link.ld) ----
         -T ${APP_HAL_PATH}/Link.ld
+
+        # ---- 存储器容量 (由 select_chip 的 FLASH/RAM 解析得出) ----
+        ${HC32_MEM_LINK_OPTS}
 
         # ---- 垃圾回收未引用段 (配合编译期 -ffunction-sections -fdata-sections) ----
         -Wl,--gc-sections

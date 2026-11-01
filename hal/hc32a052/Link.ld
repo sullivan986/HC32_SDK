@@ -26,8 +26,8 @@
  *  即型号第 3 个字母为 "8" => 64KB Flash, "A" => 128KB Flash。
  *  RAM 全部为 16KB (0x20000000 ~ 0x20003FFF)。
  *
- *  默认配置: 128KB Flash / 16KB RAM (FA / JA 型号)。
- *  若使用 64KB 型号, 请把下面 FLASH 的 LENGTH 改为 64K。
+ *  默认配置: 128KB Flash / 16KB RAM (A 后缀型号)。
+ *  换成 64KB 型号 (8 后缀) 无需改本文件: select_chip(hc32a052 FLASH 64K)
  * -----------------------------------------------------------------------------
  */
 
@@ -50,9 +50,9 @@ __stack_size = _Min_Stack_Size;
  * ------------------------------------------------------------------------- */
 MEMORY
 {
-  /* 型号 FA/JA 用 128K; 型号 F8/J8 请改为 64K */
-  FLASH (rx)  : ORIGIN = 0x00000000, LENGTH = 128K
-  RAM   (xrw) : ORIGIN = 0x20000000, LENGTH = 16K
+  /* 默认表示 128K 型号; F8/J8 (64K) 由 CMake 传 __flash_len 覆盖 */
+  FLASH (rx)  : ORIGIN = 0x00000000, LENGTH = DEFINED(__flash_len) ? __flash_len : 128K
+  RAM   (xrw) : ORIGIN = 0x20000000, LENGTH = DEFINED(__ram_len) ? __ram_len : 16K
 }
 
 /* 栈顶 (满递减栈), 位于 RAM 最高地址 (picolibc 约定: __stack) */

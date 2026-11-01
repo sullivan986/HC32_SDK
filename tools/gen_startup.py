@@ -60,7 +60,8 @@ CHIPS = {
         "ram": ("0x20000000", "16K"),
         "min_heap": 0x200,
         "min_stack": 0x400,
-        "note": ["型号 FA/JA 用 128K Flash; 型号 F8/J8 请把 LENGTH 改为 64K.",
+        "note": ["型号后缀 A = 128K Flash, 8 = 64K (默认 128K).",
+                 "换容量由 CMake 传入: select_chip(hc32a052 FLASH 64K).",
                  "RAM 全部 16KB (型号后缀无关)."],
     },
     "hc32f005": {
@@ -97,7 +98,8 @@ CHIPS = {
         "ram": ("0x1FFF8000", "188K"),
         "min_heap": 0x400,
         "min_stack": 0x800,
-        "note": ["型号密度: xE = 512KB Flash, xC = 256KB Flash (本脚本按 xE 512K).",
+        "note": ["型号后缀 E = 512KB Flash, C = 256KB Flash (默认 512K).",
+                 "换容量由 CMake 传入: select_chip(hc32f460 FLASH 256K).",
                  "RAM 基址是 0x1FFF8000 (与 M0+ 系列的 0x20000000 不同!), 共 188KB.",
                  "另有一段 RET_RAM 在 0x200F0000 (4KB), 本脚本未使用.",
                  "注意: Cortex-M4F 带 FPU, 用硬件浮点需保证 SystemInit 里使能了",
@@ -257,11 +259,13 @@ __stack_size = _Min_Stack_Size;
 
 /* ---------------------------------------------------------------------------
  * 内存区域定义
+ * -------------------------------------------------------------------------
+ * 未传 --defsym 时用默认值 (本系列最大容量).
  * ------------------------------------------------------------------------- */
 MEMORY
 {{
-  FLASH (rx)  : ORIGIN = {FLASH_ORG}, LENGTH = {FLASH_LEN}
-  RAM   (xrw) : ORIGIN = {RAM_ORG}, LENGTH = {RAM_LEN}
+  FLASH (rx)  : ORIGIN = {FLASH_ORG}, LENGTH = DEFINED(__flash_len) ? __flash_len : {FLASH_LEN}
+  RAM   (xrw) : ORIGIN = {RAM_ORG}, LENGTH = DEFINED(__ram_len) ? __ram_len : {RAM_LEN}
 }}
 
 /* 栈顶 (满递减栈), 位于 RAM 最高地址 (picolibc 约定: __stack) */

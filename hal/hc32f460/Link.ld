@@ -15,7 +15,8 @@
  *  内存映射:
  *    Flash: 0x00000000
  *    RAM  : 0x1FFF8000
- *  型号密度: xE = 512KB Flash, xC = 256KB Flash (本脚本按 xE 512K).
+ *  型号后缀 E = 512KB Flash, C = 256KB Flash (默认 512K).
+ *  换容量由 CMake 传入: select_chip(hc32f460 FLASH 256K).
  *  RAM 基址是 0x1FFF8000 (与 M0+ 系列的 0x20000000 不同!), 共 188KB.
  *  另有一段 RET_RAM 在 0x200F0000 (4KB), 本脚本未使用.
  *  注意: Cortex-M4F 带 FPU, 用硬件浮点需保证 SystemInit 里使能了
@@ -39,11 +40,13 @@ __stack_size = _Min_Stack_Size;
 
 /* ---------------------------------------------------------------------------
  * 内存区域定义
+ * -------------------------------------------------------------------------
+ * 未传 --defsym 时用默认值 (本系列最大容量).
  * ------------------------------------------------------------------------- */
 MEMORY
 {
-  FLASH (rx)  : ORIGIN = 0x00000000, LENGTH = 512K
-  RAM   (xrw) : ORIGIN = 0x1FFF8000, LENGTH = 188K
+  FLASH (rx)  : ORIGIN = 0x00000000, LENGTH = DEFINED(__flash_len) ? __flash_len : 512K
+  RAM   (xrw) : ORIGIN = 0x1FFF8000, LENGTH = DEFINED(__ram_len) ? __ram_len : 188K
 }
 
 /* 栈顶 (满递减栈), 位于 RAM 最高地址 (picolibc 约定: __stack) */

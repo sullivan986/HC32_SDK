@@ -36,11 +36,13 @@ __stack_size = _Min_Stack_Size;
 
 /* ---------------------------------------------------------------------------
  * 内存区域定义
+ * -------------------------------------------------------------------------
+ * 未传 --defsym 时用默认值 (本系列最大容量).
  * ------------------------------------------------------------------------- */
 MEMORY
 {
-  FLASH (rx)  : ORIGIN = 0x00000000, LENGTH = 32K
-  RAM   (xrw) : ORIGIN = 0x20000000, LENGTH = 4K
+  FLASH (rx)  : ORIGIN = 0x00000000, LENGTH = DEFINED(__flash_len) ? __flash_len : 32K
+  RAM   (xrw) : ORIGIN = 0x20000000, LENGTH = DEFINED(__ram_len) ? __ram_len : 4K
 }
 
 /* 栈顶 (满递减栈), 位于 RAM 最高地址 (picolibc 约定: __stack) */
