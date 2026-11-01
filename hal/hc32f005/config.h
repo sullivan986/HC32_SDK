@@ -1,35 +1,20 @@
 /**
  *******************************************************************************
  * @file  config.h
- * @brief HC32F005 板级配置「机制」: 类型 / 预设 / 校验 / 接口 (HAL 提供)
+ * @brief HC32F005 板级配置: 类型 / 预设 / 校验 / C 接口
  *
- * ## 三层分工
- *   driver.h / driver.cpp  器件寄存器与外设驱动 (tools/merge_driver.py 生成, 勿手改)
- *   config.h / config.cpp  本层「机制」: 配置类型、预设、校验、时钟初始化实现
- *   board_config.h         app 层「策略」: 晶振频率、生效配置、板载引脚
+ * 三层分工:
+ *   driver.h/driver.cpp    寄存器与外设驱动 (merge_driver.py 生成, 勿手改)
+ *   config.h/config.cpp    机制层: 配置类型、预设、校验、时钟初始化
+ *   board_config.h         策略层 (app 侧): 晶振频率、生效配置、板载引脚
  *
- * ## 为什么要分层
- *   "Config 类型有哪些字段""时钟怎么切""参数范围是多少" 是每块板子都一样
- *   的机制; 而"这块板焊了几 MHz 晶振""开机跑哪个档""LED 接哪个脚" 是每个
- *   应用各不相同的策略. 策略写死在 HAL 里会导致每换一个 app 就得改 HAL.
- *   因此策略被移到 app 侧: app 只需在自己的 inc 目录放一个 board_config.h,
- *   本文件会自动包含它 (见第 2 节).
- *   => 正常使用**不需要改本文件**; 改板级参数请改 app 的 board_config.h.
+ * 包含方向不可反过来 (否则循环包含):
+ *   driver.h -> config.h -> board_config.h
+ *   config.cpp -> driver.h
  *
- * ## 包含方向 (请勿反过来)
- *   driver.h   ->  #include "config.h"        (驱动内部用 SYSTEM_XTH 做频率换算)
- *   config.h   ->  #include "board_config.h"  (app 侧, 若存在)
- *   config.cpp ->  #include "driver.h"
- * 所以本文件 **不得** include "driver.h", 否则形成循环包含.
- *
- * ## HC32F005 与 HC32A052 的时钟差异 (写配置时注意)
- *   - **无 PLL**: 时钟源只有 RCH / XTH / RCL / XTL 四种, 主频靠 RCH 自身分档
- *     (最高 24MHz) 或外部晶振 (最高 32MHz) 直接决定.
- *   - RCH 分档是"直接选频率"而非 A052 那种"12MHz 再分频":
- *       24MHz=0, 22.12MHz=1, 16MHz=2, 8MHz=3, 4MHz=4 (枚举值即档位索引)
- *   - Flash 读等待周期只有 0/1 两档 (HCLK > 24MHz 时必须为 1).
- *   - 无 XTL 振幅配置 (en_sysctrl_xtl_amp_t 不存在), 也无需 SYSTEM_XTL 宏.
- *   - 无外部晶振失效检测 API, 故没有 auto_switch_rch_on_fail 选项.
+ * 与 A052 的时钟差异: 无 PLL; 时钟源仅 RCH/XTH/RCL/XTL;
+ * RCH 直接选频率 (24/22.12/16/8/4 MHz, 枚举值即档位索引);
+ * Flash 等待周期只有 0/1 两档 (>24MHz 必须为 1).
  *******************************************************************************
  * Copyright (C) 2022, Xiaohua Semiconductor Co., Ltd. All rights reserved.
  *

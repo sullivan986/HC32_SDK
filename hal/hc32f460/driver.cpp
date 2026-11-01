@@ -3,21 +3,16 @@
  * @file  driver.cpp
  * @brief HC32F460 驱动库 - 聚合实现 [自动生成, 勿手改]
  *
- * 本文件由 XHSC HC32F460 DDL 自动聚合生成, 请勿逐模块手工修改.
- * 重新生成: python3 tools/merge_driver.py            (会覆盖本文件的修改)
- *
+ * [自动生成, 勿手改] 重新生成: python3 tools/merge_driver.py
  * 聚合来源: temp/HC32F460_DDL_Rev3.3.0/
  *   drivers/hc32_ll_driver/inc//       驱动模块 (inc + src 同名目录)
  *   drivers/cmsis/Device/HDSC/hc32f4xx/Include// 器件头 / 中断框架
  *
- * 未纳入本文件的部分 (与板级/外部强相关, 按「机制/策略」分层):
- *   hal/hc32f460/config.h          板级配置「机制」: 类型 / 预设 / 校验
- *   hal/hc32f460/config.cpp        时钟初始化实现 (SystemInit)
- *   app/<proj>/inc/board_config.h  板级「策略」: 晶振频率 + 生效配置 + 板载引脚
- *                                  (由 config.h 自动包含, app 侧文件)
+ * 未纳入本文件 (机制/策略分层):
+ *   hal/hc32f460/config.h, config.cpp   板级配置与时钟初始化
+ *   app/<proj>/inc/board_config.h  app 策略层 (由 config.h 自动包含)
  *
- * 所有函数声明统一包裹在一层 extern "C" 内, 保持 C 链接以保证底层寄存器操作
- * 不受 C++ 名称修饰影响; 亦因此本头文件可被 C 与 C++ 同时包含.
+ * 全部声明包在 extern "C" 内, 避免 C++ 名称修饰; C 与 C++ 均可包含.
  *
  * Copyright (C) 2022, Xiaohua Semiconductor Co., Ltd. All rights reserved.
  *
@@ -31,8 +26,8 @@
 
 #include "driver.h"
 
-/* 厂商 C 代码惯用 `volatile 变量--` (超时计数), C++20 起被标记 deprecated.
- * 语义无误, 仅在生成本 TU 内屏蔽该告警, 不影响用户代码. */
+/* 厂商代码用 `volatile 变量--` 做超时计数, C++20 起 deprecated.
+ * 仅屏蔽本 TU 的该告警, 不影响用户代码. */
 #if defined(__clang__)
 #  pragma clang diagnostic ignored "-Wdeprecated-volatile"
 #endif

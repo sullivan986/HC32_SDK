@@ -570,20 +570,15 @@ def banner(kind, title):
  * @file  %s
  * @brief %s
  *
- * 本文件由 XHSC %s DDL 自动聚合生成, 请勿逐模块手工修改.
- * 重新生成: python3 %s            (会覆盖本文件的修改)
- *
+ * [自动生成, 勿手改] 重新生成: python3 %s
  * 聚合来源: temp/%s/
 %s
  *
- * 未纳入本文件的部分 (与板级/外部强相关, 按「机制/策略」分层):
- *   hal/%s/config.h          板级配置「机制」: 类型 / 预设 / 校验
- *   hal/%s/config.cpp        时钟初始化实现 (SystemInit)
- *   app/<proj>/inc/board_config.h  板级「策略」: 晶振频率 + 生效配置 + 板载引脚
- *                                  (由 config.h 自动包含, app 侧文件)
+ * 未纳入本文件 (机制/策略分层):
+ *   hal/%s/config.h, config.cpp   板级配置与时钟初始化
+ *   app/<proj>/inc/board_config.h  app 策略层 (由 config.h 自动包含)
  *
- * 所有函数声明统一包裹在一层 extern "C" 内, 保持 C 链接以保证底层寄存器操作
- * 不受 C++ 名称修饰影响; 亦因此本头文件可被 C 与 C++ 同时包含.
+ * 全部声明包在 extern "C" 内, 避免 C++ 名称修饰; C 与 C++ 均可包含.
  *
  * Copyright (C) 2022, Xiaohua Semiconductor Co., Ltd. All rights reserved.
  *
@@ -594,10 +589,10 @@ def banner(kind, title):
  *
  *******************************************************************************
  */
-""" % (kind, title, UPPER, SELF, os.path.basename(DLL),
+""" % (kind, title, SELF, os.path.basename(DLL),
        "\n".join(" *   %-34s %s" % (d + "/", desc) for d, desc in
                  _src_dirs_desc()),
-       CHIP, CHIP)
+       CHIP)
 
 
 def _src_dirs_desc():
@@ -611,16 +606,11 @@ def _src_dirs_desc():
 
 
 CONFIG_BLOCK = """/******************************************************************************/
-/* 板级配置 (外部相关, 按「机制/策略」分层)
+/* 板级配置: 驱动内时钟计算需要板上实际晶振频率, 故包含同目录 config.h.
+ *   config.h        机制层: Config 类型 / 预设 / 校验 (HAL)
+ *   board_config.h  策略层: 晶振频率 + 生效配置 (app, 由 config.h 自动包含)
  *
- * 驱动中的时钟计算 (sysctrl.c) 必须知道板上实际焊接的晶振频率, 故自动包含
- * 同目录下的 config.h.
- *
- *   config.h       板级配置「机制」: Config 类型 / 预设 / 校验 (HAL 提供)
- *   board_config.h 板级配置「策略」: 晶振频率 + 生效配置 (app 提供)
- *                  config.h 会自动 #include 它 (若在 include path 上)
- *
- * 若确实不用 board_config.h, 也可用编译选项传入:
+ * 不用 board_config.h 时也可用编译选项传入:
 {defs} *   -DHC32_BOARD_CONFIG=::hc32::board::<预设名>
  */
 /******************************************************************************/
@@ -716,25 +706,17 @@ def build_header():
         lines += section("中断分发框架 (%s)" % ", ".join(IRQ_HDRS))
         lines += irq
     if IRQ_STYLE == "ddl":
-        lines += section("中断入口与回调声明 (原厂头文件遗漏, 必须补 C 链接声明)")
-        lines.append("/*")
-        lines.append(" * %s 只声明了 EnableNvic(), 下面这些全部没有声明." % IRQ_SRCS[0])
-        lines.append(" * 单独编译成 .o 时它们是 C 符号; 但合并进 driver.cpp 后用 C++ 编译,")
-        lines.append(" * 会得到 _Z... 修饰名, 向量表引用的 C 符号名再也匹配不上, 实测后果是")
-        lines.append(" * 向量表全部落回 startup.s 的 Default_Handler, 中断彻底失效.")
-        lines.append(" *")
-        lines.append(" * 另: 回调若未实现, 由 driver.cpp 末尾的弱空定义兜底, 不会跳地址 0.")
-        lines.append(" */")
+        lines += section("中断入口与回调声明")
+        lines.append("/* 原厂只声明了 EnableNvic(); 下面这些必须补 C 链接声明,")
+        lines.append(" * 否则合并后变 _Z 名, 向量表引用失败, 中断全部落到 Default_Handler.")
+        lines.append(" * 回调弱空定义兜底在 driver.cpp 末尾. */")
         weak_cbs, handlers = extract_irq_symbols()
-        lines.append("/* 中断回调: 应用层实现同名强符号即可覆盖; "
-                     "未实现时用 driver.cpp 的弱空定义 (%d 个) */" % len(weak_cbs))
+        lines.append("/* 回调: 应用写同名强符号即可覆盖 (%d 个) */" % len(weak_cbs))
         for n in weak_cbs:
-            # 注意: 这里必须发非 __WEAK 声明. 若声明带 weak 属性, 应用层在同一 TU
-            # 里的定义会被传染成弱符号, 与 driver.cpp 的弱定义冲突 -> 链接器任选其一,
-            # 覆盖失效 (实测中断仍落到空实现).
+            # 声明不能带 __WEAK, 否则应用层定义会被传染成弱符号, 覆盖失效
             lines.append("void %s(void);" % n)
         lines.append("")
-        lines.append("/* 向量表中断入口: driver 提供强定义, 覆盖 startup.s 的弱默认 (%d 个) */"
+        lines.append("/* 向量表入口: driver 提供强定义, 覆盖 startup.s 的弱默认 (%d 个) */"
                      % len(handlers))
         for n in handlers:
             lines.append("void %s(void);" % n)
@@ -743,12 +725,8 @@ def build_header():
         lines += sysm
     if MISSING_DECLS:
         lines += section("原厂遗漏声明的补全")
-        lines.append("/*")
-        lines.append(" * 以下符号在源码中有定义, 但原厂头文件从未声明; 若不补声明,")
-        lines.append(" * 聚合到 .cpp 用 C++ 编译后会变成 _Z... 修饰名, 与其它 TU 的")
-        lines.append(" * C 符号引用不匹配 (实现见 config.cpp 的另有说明).")
-        lines.append(" * 校验: clang++ -c driver.cpp && llvm-nm driver.o | grep -w _Z")
-        lines.append(" */")
+        lines.append("/* 这些符号有定义但原厂头未声明; 不补则合入 .cpp 后变 _Z 名.")
+        lines.append(" * 校验: clang++ -c driver.cpp && llvm-nm driver.o | grep -w _Z */")
         lines += MISSING_DECLS
         lines.append("")
     lines.append("#ifdef __cplusplus")
@@ -774,8 +752,8 @@ def build_source():
                     "%s 驱动库 - 聚合实现 [自动生成, 勿手改]" % UPPER)]
     lines.append('#include "driver.h"')
     lines.append("")
-    lines.append("/* 厂商 C 代码惯用 `volatile 变量--` (超时计数), C++20 起被标记 deprecated.")
-    lines.append(" * 语义无误, 仅在生成本 TU 内屏蔽该告警, 不影响用户代码. */")
+    lines.append("/* 厂商代码用 `volatile 变量--` 做超时计数, C++20 起 deprecated.")
+    lines.append(" * 仅屏蔽本 TU 的该告警, 不影响用户代码. */")
     lines.append("#if defined(__clang__)")
     lines.append('#  pragma clang diagnostic ignored "-Wdeprecated-volatile"')
     lines.append("#endif")
@@ -800,12 +778,9 @@ def build_source():
     # (LL 风格的中断处理函数在原厂 .c 里就是强定义, 不存在这个问题.)
     if IRQ_STYLE == "ddl":
         weak_cbs, _ = extract_irq_symbols()
-        lines += section("中断回调弱定义 (空实现, 应用层可写同名强符号覆盖)")
-        lines.append("/*")
-        lines.append(" * 下列回调原厂只有 __WEAK 声明而无定义, 入口处理函数却会调用它们.")
-        lines.append(" * 补空定义以消除弱未定义符号 (调用行为不再依赖链接器细节).")
-        lines.append(" * 应用层若要处理该中断, 直接定义同名函数 (非 __WEAK) 即可自动覆盖.")
-        lines.append(" */")
+        lines += section("中断回调弱定义 (空实现)")
+        lines.append("/* 原厂只有 __WEAK 声明而无定义; 补空定义避免弱未定义符号.")
+        lines.append(" * 应用层写同名非 __WEAK 函数即可覆盖. */")
         for n in weak_cbs:
             lines.append("__WEAK void %s(void) {}" % n)
 

@@ -3,21 +3,16 @@
  * @file  driver.h
  * @brief HC32F005 驱动库 - 聚合头文件 (声明/类型/宏) [自动生成, 勿手改]
  *
- * 本文件由 XHSC HC32F005 DDL 自动聚合生成, 请勿逐模块手工修改.
- * 重新生成: python3 tools/merge_driver.py            (会覆盖本文件的修改)
- *
+ * [自动生成, 勿手改] 重新生成: python3 tools/merge_driver.py
  * 聚合来源: temp/HC32F005_DDL_Rev2.0.0/
  *   driver/inc//                       驱动模块 (inc + src 同名目录)
  *   mcu/common//                       器件头 / 中断框架
  *
- * 未纳入本文件的部分 (与板级/外部强相关, 按「机制/策略」分层):
- *   hal/hc32f005/config.h          板级配置「机制」: 类型 / 预设 / 校验
- *   hal/hc32f005/config.cpp        时钟初始化实现 (SystemInit)
- *   app/<proj>/inc/board_config.h  板级「策略」: 晶振频率 + 生效配置 + 板载引脚
- *                                  (由 config.h 自动包含, app 侧文件)
+ * 未纳入本文件 (机制/策略分层):
+ *   hal/hc32f005/config.h, config.cpp   板级配置与时钟初始化
+ *   app/<proj>/inc/board_config.h  app 策略层 (由 config.h 自动包含)
  *
- * 所有函数声明统一包裹在一层 extern "C" 内, 保持 C 链接以保证底层寄存器操作
- * 不受 C++ 名称修饰影响; 亦因此本头文件可被 C 与 C++ 同时包含.
+ * 全部声明包在 extern "C" 内, 避免 C++ 名称修饰; C 与 C++ 均可包含.
  *
  * Copyright (C) 2022, Xiaohua Semiconductor Co., Ltd. All rights reserved.
  *
@@ -33,16 +28,11 @@
 #define __HC32F005_DRIVER_H__
 
 /******************************************************************************/
-/* 板级配置 (外部相关, 按「机制/策略」分层)
+/* 板级配置: 驱动内时钟计算需要板上实际晶振频率, 故包含同目录 config.h.
+ *   config.h        机制层: Config 类型 / 预设 / 校验 (HAL)
+ *   board_config.h  策略层: 晶振频率 + 生效配置 (app, 由 config.h 自动包含)
  *
- * 驱动中的时钟计算 (sysctrl.c) 必须知道板上实际焊接的晶振频率, 故自动包含
- * 同目录下的 config.h.
- *
- *   config.h       板级配置「机制」: Config 类型 / 预设 / 校验 (HAL 提供)
- *   board_config.h 板级配置「策略」: 晶振频率 + 生效配置 (app 提供)
- *                  config.h 会自动 #include 它 (若在 include path 上)
- *
- * 若确实不用 board_config.h, 也可用编译选项传入:
+ * 不用 board_config.h 时也可用编译选项传入:
  *   -DSYSTEM_XTH=<值>
  *   -DHC32_BOARD_CONFIG=::hc32::board::<预设名>
  */
@@ -7525,18 +7515,13 @@ extern void EnableNvic(IRQn_Type enIrq, en_irq_level_t enLevel, boolean_t bEn);
 
 
 /* ========================================================================== */
-/*  中断入口与回调声明 (原厂头文件遗漏, 必须补 C 链接声明)                                           */
+/*  中断入口与回调声明                                                                 */
 /* ========================================================================== */
 
-/*
- * interrupts_hc32f005.c 只声明了 EnableNvic(), 下面这些全部没有声明.
- * 单独编译成 .o 时它们是 C 符号; 但合并进 driver.cpp 后用 C++ 编译,
- * 会得到 _Z... 修饰名, 向量表引用的 C 符号名再也匹配不上, 实测后果是
- * 向量表全部落回 startup.s 的 Default_Handler, 中断彻底失效.
- *
- * 另: 回调若未实现, 由 driver.cpp 末尾的弱空定义兜底, 不会跳地址 0.
- */
-/* 中断回调: 应用层实现同名强符号即可覆盖; 未实现时用 driver.cpp 的弱空定义 (28 个) */
+/* 原厂只声明了 EnableNvic(); 下面这些必须补 C 链接声明,
+ * 否则合并后变 _Z 名, 向量表引用失败, 中断全部落到 Default_Handler.
+ * 回调弱空定义兜底在 driver.cpp 末尾. */
+/* 回调: 应用写同名强符号即可覆盖 (28 个) */
 void SysTick_IRQHandler(void);
 void Port0_IRQHandler(void);
 void Port1_IRQHandler(void);
@@ -7566,7 +7551,7 @@ void Flash_IRQHandler(void);
 void Ram_IRQHandler(void);
 void ClkTrim_IRQHandler(void);
 
-/* 向量表中断入口: driver 提供强定义, 覆盖 startup.s 的弱默认 (27 个) */
+/* 向量表入口: driver 提供强定义, 覆盖 startup.s 的弱默认 (27 个) */
 void HardFault_Handler(void);
 void SysTick_Handler(void);
 void PORT0_IRQHandler(void);
@@ -7599,12 +7584,8 @@ void CLKTRIM_IRQHandler(void);
 /*  原厂遗漏声明的补全                                                                 */
 /* ========================================================================== */
 
-/*
- * 以下符号在源码中有定义, 但原厂头文件从未声明; 若不补声明,
- * 聚合到 .cpp 用 C++ 编译后会变成 _Z... 修饰名, 与其它 TU 的
- * C 符号引用不匹配 (实现见 config.cpp 的另有说明).
- * 校验: clang++ -c driver.cpp && llvm-nm driver.o | grep -w _Z
- */
+/* 这些符号有定义但原厂头未声明; 不补则合入 .cpp 后变 _Z 名.
+ * 校验: clang++ -c driver.cpp && llvm-nm driver.o | grep -w _Z */
 en_result_t Uart_SetSaddr(M0P_UART_TypeDef *UARTx, uint8_t u8Addr);
 void Debug_Output(uint8_t u8Data);
 void _ttywrch(int c);

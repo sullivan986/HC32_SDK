@@ -1,37 +1,22 @@
 /**
  *******************************************************************************
  * @file  config.h
- * @brief HC32F460 板级配置「机制」: 类型 / 预设 / 校验 / 接口 (HAL 提供)
+ * @brief HC32F460 板级配置: 类型 / 预设 / 校验 / C 接口
  *
- * ## 三层分工
- *   driver.h / driver.cpp  器件寄存器与外设驱动 (tools/merge_driver.py 生成, 勿手改)
- *   config.h / config.cpp  本层「机制」: 配置类型、预设、校验、时钟初始化实现
- *   board_config.h         app 层「策略」: 晶振频率、生效配置、板载引脚
+ * 三层分工:
+ *   driver.h/driver.cpp    寄存器与外设驱动 (merge_driver.py 生成, 勿手改)
+ *   config.h/config.cpp    机制层: 配置类型、预设、校验、时钟初始化
+ *   board_config.h         策略层 (app 侧): 生效配置、晶振、板载引脚
  *
- * ## 为什么要分层
- *   "Config 类型有哪些字段""时钟怎么切""参数范围是多少" 是每块板子都一样
- *   的机制; 而"这块板焊了几 MHz 晶振""开机跑哪个档""LED 接哪个脚" 是每个
- *   应用各不相同的策略. 策略写死在 HAL 里会导致每换一个 app 就得改 HAL.
- *   => 正常使用**不需要改本文件**; 改板级参数请改 app 的 board_config.h.
+ * 包含方向不可反过来 (否则循环包含):
+ *   driver.h -> config.h -> board_config.h
+ *   config.cpp -> driver.h
  *
- * ## 包含方向 (请勿反过来)
- *   driver.h   ->  #include "config.h"
- *   config.h   ->  #include "board_config.h"  (app 侧, 若存在)
- *   config.cpp ->  #include "driver.h"
- * 所以本文件 **不得** include "driver.h", 否则形成循环包含.
- *
- * ## 与 HC32A052 / HC32F005 的差异 (写配置时注意)
- *   - 内核是 **Cortex-M4F** (带 FPU), 不是 M0+.
- *   - 时钟树复杂得多: HRC / MRC / LRC / XTAL / XTAL32 / **MPLL / UPLL**,
- *     且分频是"每个总线各自一份"(HCLK / EXCLK / PCLK0..PCLK4).
- *   - **PLL 参数是 M/N/P/Q/R 五个**, 不是 A052 那种 in_div/mul_n/out_div:
- *         Fvco = Fin / M * N ,  Fout = Fvco / P
- *     (PLLM/PLLN/PLLP/PLLQ/PLLR 寄存器里存的都是"实际值 - 1")
- *   - 时钟初始化前需要放开寄存器写保护 (LL_PERIPH_WE) 并设置
- *     SRAM / EFM 等待周期, 高频切换前还要 PWC_HighSpeedToHighPerformance().
- *   - 厂商不引用晶振频率宏 (system_hc32f460.c 直接读寄存器算频率), 故本芯片
- *     **不强制** board_config.h 提供任何宏; 但晶振频率会影响 PLL 实际频率,
- *     请按板上实际晶振在 board_config.h 里说明并选对预设.
+ * 本芯片 (M4F) 与 M0+ 系列的差异:
+ *   - 时钟源含 MRC/LRC/XTAL32, 以及 MPLL; 分频是 HCLK/EXCLK/PCLK0..4 各自一份
+ *   - PLL 参数为 M/N/P/Q/R: Fvco = Fin/M*N, Fout = Fvco/P (寄存器存"值-1")
+ *   - 初始化需先放开写保护, 并设 SRAM/EFM 等待周期
+ *   - 厂商不引用晶振频率宏, 故不强制 board_config.h 定义任何宏
  *******************************************************************************
  * Copyright (C) 2022, Xiaohua Semiconductor Co., Ltd. All rights reserved.
  *
@@ -47,17 +32,14 @@
 
 #ifdef __cplusplus
 #include <cstdint>
+#include <utility>
 #else
 #include <stdint.h> /* config.h 在 driver.h 的系统头之前被包含, C 下需自带 */
 #endif
 
 /* ==========================================================================
- * 1. 板级配置「机制」——类型 / 预设 / 校验 (HAL 提供, 通常无需修改)
- * --------------------------------------------------------------------------
- * 下面这些 enum / struct 的数值都与 driver.h 中对应的 CLK_* 宏一致,
- * config.cpp 里有 static_assert 逐项校验, 改坏了会在编译期报错.
- *
- * 注意: 本节点只定义"有哪些配置项"; 实际生效的选择在第 4 节, 由 app 决定.
+ * 1. 配置类型 / 预设 / 校验
+ *    enum 数值与 driver.h 的 CLK_* 宏一致; config.cpp 用 static_assert 逐项校验.
  * ========================================================================== */
 #ifdef __cplusplus
 
@@ -164,17 +146,17 @@ struct Config
 };
 
 /// 分频指数 -> 实际分频比
-constexpr std::uint32_t div_ratio(Div d) noexcept
+[[nodiscard]] constexpr std::uint32_t div_ratio(Div d) noexcept
 {
-    return 1u << static_cast<std::uint8_t>(d);
+    return 1u << std::to_underlying(d);
 }
 
-/// 编译期校验: 各字段取值是否都在厂商允许范围内
-constexpr bool is_valid(const Config &c) noexcept
+/// 编译期校验: 各字段是否在厂商允许范围内
+[[nodiscard]] constexpr bool is_valid(const Config &c) noexcept
 {
     if (c.hrc_trim < -32 || c.hrc_trim > 31)
         return false;
-    /* PLL 各分频/倍频范围 (与手册的 PLLM/PLLN/PLLP/PLLQ/PLLR 位宽一致) */
+    /* PLL 各分频/倍频范围 (与 PLLM/PLLN/PLLP/PLLQ/PLLR 位宽一致) */
     if (c.pll.m < 1u || c.pll.m > 32u)
         return false;
     if (c.pll.n < 1u || c.pll.n > 512u)
@@ -193,26 +175,25 @@ constexpr bool is_valid(const Config &c) noexcept
 
 /* ---- 预设: app 在 board_config.h 里挑一个赋给 HC32_BOARD_CONFIG ---- */
 
-/// [默认] 保持复位默认档: HRC, 总线不分频 (不需要任何外部器件)
+/// [默认] 复位默认档: HRC, 不分频, 不需外部器件
 inline constexpr Config preset_hrc_default{
     .source = ClockSource::Hrc,
 };
 
-/// 外部 8MHz 晶振直出, 总线全不分频
+/// 外部 8MHz 晶振直出, 不分频
 inline constexpr Config preset_xtal_8mhz{
     .source = ClockSource::Xtal,
     .xtal = {.enable = true, .drive = XtalDrive::ULow, .stable = XtalStable::Ms2},
 };
 
-/// 外部 8MHz 晶振 + MPLL => 200MHz (8/1*50/2)
-/// 高位主频, 必须放开 SRAM/EFM 等待周期并切高性能模式 (config.cpp 会自动做)
+/// 外部 8MHz + MPLL => 200MHz (8/1*50/2)
 inline constexpr Config preset_pll_200mhz_from_xtal{
     .source = ClockSource::Pll,
     .xtal = {.enable = true, .drive = XtalDrive::ULow, .stable = XtalStable::Ms2},
     .pll = {.source = PllSource::Xtal, .m = 1u, .n = 50u, .p = 2u, .q = 2u, .r = 2u},
 };
 
-/// 内部 HRC + MPLL (HRC 约 16MHz, 精度差, 仅适合无需精确时钟的场合)
+/// 内部 HRC + MPLL (HRC 精度差, 仅适合不要求精确时钟的场合)
 inline constexpr Config preset_pll_from_hrc{
     .source = ClockSource::Pll,
     .pll = {.source = PllSource::Hrc, .m = 2u, .n = 50u, .p = 2u, .q = 2u, .r = 2u},
@@ -229,18 +210,9 @@ static_assert(is_valid(preset_pll_from_hrc), "HAL 预设 preset_pll_from_hrc 非
 #endif /* __cplusplus (机制部分结束) */
 
 /* ==========================================================================
- * 2. 板级配置「策略」——由 app 提供 (HAL 不替任何板子做选择)
- * --------------------------------------------------------------------------
- * app 可在它的 inc 目录放一个 board_config.h (本文件会自动包含), 里面定义:
- *   HC32_BOARD_CONFIG   实际生效的 hc32::board::Config 表达式
- *   (可选) 板载资源宏   LED / 按键等引脚
- *
- * 也可改用编译选项传入:
- *   -DHC32_BOARD_CONFIG=::hc32::board::preset_hrc_default
- *
- * 注意: F460 厂商代码不引用晶振频率宏, 故这里**不强制**定义 SYSTEM_XTH;
- *       但用 XTAL / PLL 时, 请确认预设的 PLL 参数与板上晶振匹配
- *       (厂商默认 XTAL_VALUE = 8MHz, 见 system_hc32f460.h).
+ * 2. 策略层: app 在 inc/board_config.h 里定义 (本文件自动包含)
+ *    HC32_BOARD_CONFIG   生效的 Config 表达式, 留空则用 preset_hrc_default
+ *    也可改用 -DHC32_BOARD_CONFIG=::hc32::board::preset_xxx
  * ========================================================================== */
 #if defined(__has_include)
 #if __has_include("board_config.h")
@@ -251,29 +223,28 @@ static_assert(is_valid(preset_pll_from_hrc), "HAL 预设 preset_pll_from_hrc 非
 #ifdef __cplusplus
 
 /* ==========================================================================
- * 3. 生效配置 (把 app 的选择接进 C++ 命名空间)
+ * 3. 生效配置
  * ========================================================================== */
 namespace hc32::board
 {
 
-/// 实际生效的板级配置 —— 取自 app 的 board_config.h; 未提供时用安全默认档
+/// 实际生效的板级配置; 未提供时用安全默认档
 #if defined(HC32_BOARD_CONFIG)
 inline constexpr Config config = HC32_BOARD_CONFIG;
 #else
 inline constexpr Config config = preset_hrc_default;
 #endif
 
-static_assert(is_valid(config), "板级配置非法: 请检查 app 的 board_config.h (PLL 分频/倍频范围)");
+static_assert(is_valid(config), "板级配置非法: 检查 board_config.h 的 PLL 分频/倍频范围");
 
 /// 本配置是否会真正用到外部晶振
 inline constexpr bool uses_external_crystal =
     (config.source == ClockSource::Xtal) || (config.source == ClockSource::Xtal32) ||
     (config.source == ClockSource::Pll && config.pll.source == PllSource::Xtal);
 
-/// 切换完成后的 HCLK (Hz) —— 需要知道晶振实际频率才能算准, 这里按厂商默认
-/// XTAL_VALUE / HRC 标称值估算, 仅用于"选等待周期"这种粗粒度场合;
-/// 运行时精确值请读 SystemCoreClock (config.cpp 里由 CLK_GetClockFreq 刷新).
-constexpr std::uint32_t target_hclk_hz() noexcept
+/// 估算切换后的 HCLK (Hz). 按标称值算, 只用于选等待周期这类粗粒度场合;
+/// 运行时的精确值请读 SystemCoreClock.
+[[nodiscard]] constexpr std::uint32_t target_hclk_hz() noexcept
 {
     constexpr std::uint32_t kXtalHz = 8000000u; ///< 与 system_hc32f460.h 的 XTAL_VALUE 一致
     constexpr std::uint32_t kHrcHz = 16000000u; ///< HRC 典型值
@@ -301,11 +272,7 @@ constexpr std::uint32_t target_hclk_hz() noexcept
 #endif /* __cplusplus (生效配置结束) */
 
 /* ==========================================================================
- * 4. C 链接接口 (startup.s 与 driver.cpp 的消费者)
- * --------------------------------------------------------------------------
- * startup.s 的 Reset_Handler 会 `bl SystemInit`; driver.cpp 里的
- * DDL_DelayMS/DDL_DelayUS 会读 SystemCoreClock (通过 HCLK_VALUE 宏).
- * 这两个都必须是 C 符号, 故显式 extern "C".
+ * 4. C 链接接口 (startup.s 与 driver.cpp 使用)
  * ========================================================================== */
 #ifdef __cplusplus
 extern "C"

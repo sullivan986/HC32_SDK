@@ -3,21 +3,16 @@
  * @file  driver.h
  * @brief HC32F460 驱动库 - 聚合头文件 (声明/类型/宏) [自动生成, 勿手改]
  *
- * 本文件由 XHSC HC32F460 DDL 自动聚合生成, 请勿逐模块手工修改.
- * 重新生成: python3 tools/merge_driver.py            (会覆盖本文件的修改)
- *
+ * [自动生成, 勿手改] 重新生成: python3 tools/merge_driver.py
  * 聚合来源: temp/HC32F460_DDL_Rev3.3.0/
  *   drivers/hc32_ll_driver/inc//       驱动模块 (inc + src 同名目录)
  *   drivers/cmsis/Device/HDSC/hc32f4xx/Include// 器件头 / 中断框架
  *
- * 未纳入本文件的部分 (与板级/外部强相关, 按「机制/策略」分层):
- *   hal/hc32f460/config.h          板级配置「机制」: 类型 / 预设 / 校验
- *   hal/hc32f460/config.cpp        时钟初始化实现 (SystemInit)
- *   app/<proj>/inc/board_config.h  板级「策略」: 晶振频率 + 生效配置 + 板载引脚
- *                                  (由 config.h 自动包含, app 侧文件)
+ * 未纳入本文件 (机制/策略分层):
+ *   hal/hc32f460/config.h, config.cpp   板级配置与时钟初始化
+ *   app/<proj>/inc/board_config.h  app 策略层 (由 config.h 自动包含)
  *
- * 所有函数声明统一包裹在一层 extern "C" 内, 保持 C 链接以保证底层寄存器操作
- * 不受 C++ 名称修饰影响; 亦因此本头文件可被 C 与 C++ 同时包含.
+ * 全部声明包在 extern "C" 内, 避免 C++ 名称修饰; C 与 C++ 均可包含.
  *
  * Copyright (C) 2022, Xiaohua Semiconductor Co., Ltd. All rights reserved.
  *
@@ -33,16 +28,11 @@
 #define __HC32F460_DRIVER_H__
 
 /******************************************************************************/
-/* 板级配置 (外部相关, 按「机制/策略」分层)
+/* 板级配置: 驱动内时钟计算需要板上实际晶振频率, 故包含同目录 config.h.
+ *   config.h        机制层: Config 类型 / 预设 / 校验 (HAL)
+ *   board_config.h  策略层: 晶振频率 + 生效配置 (app, 由 config.h 自动包含)
  *
- * 驱动中的时钟计算 (sysctrl.c) 必须知道板上实际焊接的晶振频率, 故自动包含
- * 同目录下的 config.h.
- *
- *   config.h       板级配置「机制」: Config 类型 / 预设 / 校验 (HAL 提供)
- *   board_config.h 板级配置「策略」: 晶振频率 + 生效配置 (app 提供)
- *                  config.h 会自动 #include 它 (若在 include path 上)
- *
- * 若确实不用 board_config.h, 也可用编译选项传入:
+ * 不用 board_config.h 时也可用编译选项传入:
  *   -DHC32_BOARD_CONFIG=::hc32::board::<预设名>
  */
 /******************************************************************************/

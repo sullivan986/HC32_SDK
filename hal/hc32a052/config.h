@@ -1,26 +1,16 @@
 /**
  *******************************************************************************
  * @file  config.h
- * @brief HC32A052 板级配置「机制」: 类型 / 预设 / 校验 / 接口 (HAL 提供)
+ * @brief HC32A052 板级配置: 类型 / 预设 / 校验 / C 接口
  *
- * ## 三层分工
- *   driver.h / driver.cpp  器件寄存器与外设驱动 (tools/merge_driver.py 生成, 勿手改)
- *   config.h / config.cpp  本层「机制」: 配置类型、预设、校验、时钟初始化实现
- *   board_config.h         app 层「策略」: 晶振频率、生效配置、板载引脚
+ * 三层分工:
+ *   driver.h/driver.cpp    寄存器与外设驱动 (merge_driver.py 生成, 勿手改)
+ *   config.h/config.cpp    机制层: 配置类型、预设、校验、时钟初始化
+ *   board_config.h         策略层 (app 侧): 晶振频率、生效配置、板载引脚
  *
- * ## 为什么要分层
- *   "Config 类型有哪些字段""时钟怎么切""参数范围是多少" 是**每块板子都一样**
- *   的机制; 而"这块板焊了几 MHz 晶振""开机跑哪个档""LED 接哪个脚" 是**每个
- *   应用各不相同**的策略. 策略写死在 HAL 里会导致每换一个 app 就得改 HAL.
- *   因此策略被移到 app 侧: app 只需在自己的 inc 目录放一个 board_config.h,
- *   本文件会自动包含它 (见第 2 节).
- *   => 正常使用**不需要改本文件**; 改板级参数请改 app 的 board_config.h.
- *
- * ## 包含方向 (请勿反过来)
- *   driver.h   ->  #include "config.h"        (驱动内部用 SYSTEM_XTH/XTL 做频率换算)
- *   config.h   ->  #include "board_config.h"  (app 侧, 若存在)
- *   config.cpp ->  #include "driver.h"
- * 所以本文件 **不得** include "driver.h", 否则形成循环包含.
+ * 包含方向不可反过来 (否则循环包含):
+ *   driver.h -> config.h -> board_config.h
+ *   config.cpp -> driver.h
  *******************************************************************************
  * Copyright (C) 2022, Xiaohua Semiconductor Co., Ltd. All rights reserved.
  *

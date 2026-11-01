@@ -3,21 +3,16 @@
  * @file  driver.cpp
  * @brief HC32F005 驱动库 - 聚合实现 [自动生成, 勿手改]
  *
- * 本文件由 XHSC HC32F005 DDL 自动聚合生成, 请勿逐模块手工修改.
- * 重新生成: python3 tools/merge_driver.py            (会覆盖本文件的修改)
- *
+ * [自动生成, 勿手改] 重新生成: python3 tools/merge_driver.py
  * 聚合来源: temp/HC32F005_DDL_Rev2.0.0/
  *   driver/inc//                       驱动模块 (inc + src 同名目录)
  *   mcu/common//                       器件头 / 中断框架
  *
- * 未纳入本文件的部分 (与板级/外部强相关, 按「机制/策略」分层):
- *   hal/hc32f005/config.h          板级配置「机制」: 类型 / 预设 / 校验
- *   hal/hc32f005/config.cpp        时钟初始化实现 (SystemInit)
- *   app/<proj>/inc/board_config.h  板级「策略」: 晶振频率 + 生效配置 + 板载引脚
- *                                  (由 config.h 自动包含, app 侧文件)
+ * 未纳入本文件 (机制/策略分层):
+ *   hal/hc32f005/config.h, config.cpp   板级配置与时钟初始化
+ *   app/<proj>/inc/board_config.h  app 策略层 (由 config.h 自动包含)
  *
- * 所有函数声明统一包裹在一层 extern "C" 内, 保持 C 链接以保证底层寄存器操作
- * 不受 C++ 名称修饰影响; 亦因此本头文件可被 C 与 C++ 同时包含.
+ * 全部声明包在 extern "C" 内, 避免 C++ 名称修饰; C 与 C++ 均可包含.
  *
  * Copyright (C) 2022, Xiaohua Semiconductor Co., Ltd. All rights reserved.
  *
@@ -31,8 +26,8 @@
 
 #include "driver.h"
 
-/* 厂商 C 代码惯用 `volatile 变量--` (超时计数), C++20 起被标记 deprecated.
- * 语义无误, 仅在生成本 TU 内屏蔽该告警, 不影响用户代码. */
+/* 厂商代码用 `volatile 变量--` 做超时计数, C++20 起 deprecated.
+ * 仅屏蔽本 TU 的该告警, 不影响用户代码. */
 #if defined(__clang__)
 #  pragma clang diagnostic ignored "-Wdeprecated-volatile"
 #endif
@@ -7691,14 +7686,11 @@ void CLKTRIM_IRQHandler(void)
 }
 
 /* ========================================================================== */
-/*  中断回调弱定义 (空实现, 应用层可写同名强符号覆盖)                                               */
+/*  中断回调弱定义 (空实现)                                                             */
 /* ========================================================================== */
 
-/*
- * 下列回调原厂只有 __WEAK 声明而无定义, 入口处理函数却会调用它们.
- * 补空定义以消除弱未定义符号 (调用行为不再依赖链接器细节).
- * 应用层若要处理该中断, 直接定义同名函数 (非 __WEAK) 即可自动覆盖.
- */
+/* 原厂只有 __WEAK 声明而无定义; 补空定义避免弱未定义符号.
+ * 应用层写同名非 __WEAK 函数即可覆盖. */
 __WEAK void SysTick_IRQHandler(void) {}
 __WEAK void Port0_IRQHandler(void) {}
 __WEAK void Port1_IRQHandler(void) {}

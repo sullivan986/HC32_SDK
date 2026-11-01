@@ -1,19 +1,13 @@
 /**
  *******************************************************************************
  * @file  config.cpp
- * @brief HC32A052 系统时钟初始化 (人工维护)
+ * @brief HC32A052 系统时钟初始化
  *
- * 本文件把 config.h 中声明式 (constexpr) 的板级配置翻译成厂商 DDL 的
- * Sysctrl_* 调用, 并实现 startup.s 需要的那几个 C 符号:
- *   SystemInit()            —— 复位后由 startup.s 调用, 做一次性时钟初始化
- *   SystemCoreClockUpdate() —— 重新读硬件算出 HCLK/PCLK 并刷新全局变量
- *   SystemCoreClock / SystemHCLK / SystemPCLK —— 供 driver.cpp 的延时函数使用
+ * 把 config.h 的 constexpr 配置翻译成厂商 Sysctrl_* 调用, 并提供 C 符号:
+ *   SystemInit / SystemCoreClockUpdate / SystemCoreClock / SystemHCLK / SystemPCLK
  *
- * 内容源自厂商 mcu/common/system_hc32a052.c, 已去掉 MDK/IAR 专用的
- * $Sub$$main / __low_level_init (ATfE/picolibc 下不命中), 改为由 config.h 驱动.
- *
- * 校验: 本文件与 driver.h 中的 en_sysctrl_* 数值必须一一对应, 下方 static_assert
- *       会在编译期强制检查; 改板级配置只需改 config.h, 一般无需改动本文件.
+ * 下方 static_assert 强制校验 board::* 与 en_sysctrl_* 数值一致;
+ * 改板级参数只需改 board_config.h, 一般无需改动本文件.
  *******************************************************************************
  * Copyright (C) 2022, Xiaohua Semiconductor Co., Ltd. All rights reserved.
  *
@@ -24,22 +18,18 @@
  *******************************************************************************
  */
 
-#include "driver.h" /* 同时带出 config.h (driver.h 顶部会 #include "config.h") */
+#include "driver.h"
 
 #include <cstdint>
 #include <type_traits>
+#include <utility>
 
 namespace
 {
 
 using namespace hc32::board;
 
-/* ==========================================================================
- * 枚举数值一致性校验
- * --------------------------------------------------------------------------
- * board::* 与厂商 en_sysctrl_* 的数值必须相同, 才能用一次 static_cast 互转.
- * 若哪天换成别的芯片 / 别的 DDL 版本, 这里的断言会立刻把问题暴露出来.
- * ========================================================================== */
+/* board::* 与厂商 en_sysctrl_* 数值必须相同, 才能一次 static_cast 互转 */
 static_assert(static_cast<int>(ClockSource::Rch) == static_cast<int>(SysctrlClkRCH));
 static_assert(static_cast<int>(ClockSource::Xth) == static_cast<int>(SysctrlClkXTH));
 static_assert(static_cast<int>(ClockSource::Rcl) == static_cast<int>(SysctrlClkRCL));
@@ -87,23 +77,23 @@ static_assert(!(config.pll.source == PllSource::Xth) || (config.source == ClockS
  * 工具函数
  * ========================================================================== */
 
-/// enum class -> 厂商枚举 (先转底层整型, 保证合法)
+/// enum class -> 厂商枚举
 template <typename VendorEnum, typename E> constexpr VendorEnum to_vendor(E e) noexcept
 {
-    return static_cast<VendorEnum>(static_cast<std::underlying_type_t<E>>(e));
+    return static_cast<VendorEnum>(std::to_underlying(e));
 }
 
 constexpr std::uint32_t kRchBaseHz = 12000000u; ///< RCH 基频
 
 /// RCHCR.DIV 档位 -> 实际输出频率
-constexpr std::uint32_t rch_hz(RchFreq f) noexcept
+[[nodiscard]] constexpr std::uint32_t rch_hz(RchFreq f) noexcept
 {
-    constexpr std::uint32_t div[] = {1u, 2u, 3u, 4u}; // 与 au32RCHFreqTable 一致
-    return kRchBaseHz / div[static_cast<std::uint8_t>(f)];
+    constexpr std::uint32_t div[] = {1u, 2u, 3u, 4u};
+    return kRchBaseHz / div[std::to_underlying(f)];
 }
 
-/// 按当前配置推算切换完成后的 HCLK (Hz), 用于选 Flash 读等待周期
-constexpr std::uint32_t target_hclk_hz() noexcept
+/// 按当前配置推算切换后的 HCLK (Hz), 用于选 Flash 读等待周期
+[[nodiscard]] constexpr std::uint32_t target_hclk_hz() noexcept
 {
     std::uint32_t src = 0u;
     switch (config.source)
@@ -128,11 +118,11 @@ constexpr std::uint32_t target_hclk_hz() noexcept
     }
     }
     constexpr std::uint32_t hclk_div[] = {1u, 2u, 4u, 8u, 16u, 32u, 64u, 128u};
-    return src / hclk_div[static_cast<std::uint8_t>(config.hclk_div)];
+    return src / hclk_div[std::to_underlying(config.hclk_div)];
 }
 
 /// HCLK -> Flash 读等待周期: >24 MHz 至少 1, >48 MHz 至少 2
-constexpr en_flash_waitcycle_t flash_wait_for(std::uint32_t hz) noexcept
+[[nodiscard]] constexpr en_flash_waitcycle_t flash_wait_for(std::uint32_t hz) noexcept
 {
     return (hz > 48000000u) ? FlashWaitCycle2 : (hz > 24000000u) ? FlashWaitCycle1 : FlashWaitCycle0;
 }
@@ -143,11 +133,11 @@ void enable_xth() noexcept
     (void)Sysctrl_SetXTHFreq(to_vendor<en_sysctrl_xth_freq_t>(config.xth_range));
     (void)Sysctrl_XTHDriverCfg(to_vendor<en_sysctrl_xtal_driver_t>(config.xth_drive));
     (void)Sysctrl_SetXTHStableTime(SysctrlXthStableCycle16384);
-    (void)Sysctrl_ClkSourceEnable(SysctrlClkXTH, TRUE); /* 无晶振时此调用会在此死等 */
+    (void)Sysctrl_ClkSourceEnable(SysctrlClkXTH, TRUE); /* 无晶振时会在此死等 */
 
     if (config.auto_switch_rch_on_fail)
     {
-        /* 先使能"晶振失效自动切回 RCH", 再配置失效监测 (与原厂示例顺序一致) */
+        /* 先使能自动切回 RCH, 再配失效监测 (与原厂示例顺序一致) */
         (void)Sysctrl_SetFunc(SysctrlAutoSwitchRchEn, TRUE);
         stc_sysctrl_fail_det_cfg_t det{};
         det.u32DetectIntEn = SYSCTRL_EXTOSC_FAIL_DET_INT_DIS;
@@ -163,7 +153,7 @@ void enable_xtl() noexcept
     (void)Sysctrl_XTLDriverCfg(to_vendor<en_sysctrl_xtl_amp_t>(config.xtl_amp),
                                to_vendor<en_sysctrl_xtal_driver_t>(config.xtl_drive));
     (void)Sysctrl_SetXTLStableTime(SysctrlXtlStableCycle16384);
-    (void)Sysctrl_ClkSourceEnable(SysctrlClkXTL, TRUE); /* 无晶振时此调用会在此死等 */
+    (void)Sysctrl_ClkSourceEnable(SysctrlClkXTL, TRUE); /* 无晶振时会在此死等 */
 }
 
 /// 配置并使能 PLL (必要时先起振 XTH)
@@ -171,7 +161,7 @@ void enable_pll() noexcept
 {
     if (config.pll.source == PllSource::Xth)
     {
-        enable_xth(); /* PLL 以晶振为源时必须先让 XTH 稳定 */
+        enable_xth(); /* PLL 以晶振为源时先让 XTH 稳定 */
     }
 
     stc_sysctrl_pll_cfg_t cfg{};
@@ -181,7 +171,7 @@ void enable_pll() noexcept
     cfg.u8MullN = config.pll.mul_n;
     cfg.u8MullF = config.pll.mul_f;
     cfg.u8OutputDiv = config.pll.out_div;
-    /* 参数已由 static_assert 保证合法, 此处最多一轮即成功 (与原厂示例同构) */
+    /* 参数已由 static_assert 保证合法, 最多一轮即成功 */
     while (Ok != Sysctrl_SetPLLFreq(&cfg))
     {
     }
@@ -192,14 +182,13 @@ void enable_pll() noexcept
 } // namespace
 
 /* ==========================================================================
- * C 链接接口 (供 startup.s / driver.cpp / 应用代码)
+ * C 链接接口 (startup.s / driver.cpp / 应用代码)
  * ========================================================================== */
 extern "C"
 {
 
-    /* 复位默认值: RCH 12 MHz / 3 = 4 MHz, 与厂商 system_hc32a052.c 初值一致.
-     * 必须在 SystemInit 早期就有效, 因为 Sysctrl_ClkSourceEnable(XTH/PLL) 内部会用
-     * delay1ms/delay100us, 而那两个延时函数读的正是 SystemCoreClock. */
+    /* 复位默认 RCH 12MHz/3 = 4MHz. 必须早于 SystemInit 就有效:
+     * Sysctrl_ClkSourceEnable 内部的 delay1ms 读的就是 SystemCoreClock */
     uint32_t SystemCoreClock = 4000000u;
     uint32_t SystemHCLK = 4000000u;
     uint32_t SystemPCLK = 4000000u;
@@ -210,7 +199,7 @@ extern "C"
         SystemHCLK = SystemCoreClock;
         SystemPCLK = Sysctrl_GetPClkFreq();
 
-        /* 启动 SysTick 作为自由计数器 (driver 的 delay 函数依赖它; 不开中断) */
+        /* SysTick 作自由计数器 (delay 依赖它, 不开中断) */
         SysTick->LOAD = 0xFFFFFFu;
         SysTick->VAL = 0u;
         SysTick->CTRL = SysTick_CTRL_ENABLE_Msk | SysTick_CTRL_CLKSOURCE_Msk;
@@ -218,7 +207,7 @@ extern "C"
 
     void SystemInit(void)
     {
-        /* 1) RC 时钟校准; RCH 常开 —— 它既是 PLL 的可选源, 也是晶振失效时的兜底 */
+        /* RCH 常开: 既是 PLL 可选源, 也是晶振失效时的兜底 */
         (void)Sysctrl_SetRCHTrim(to_vendor<en_sysctrl_rch_freq_t>(config.rch_freq));
         (void)Sysctrl_SetRCLTrim(to_vendor<en_sysctrl_rcl_freq_t>(config.rcl_freq));
         (void)Sysctrl_SetRCLStableTime(SysctrlRclStableCycle256);
